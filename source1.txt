@@ -1,0 +1,101 @@
+import pandas as pd
+import numpy as np
+import re
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
+from sklearn.decomposition import LatentDirichletAllocation
+from wordcloud import WordCloud
+data = pd.read_csv("/content/review.csv", on_bad_lines='skip')
+data = data[['review_text', 'rating', 'date']]
+data.dropna(inplace=True)
+
+def rating_to_sentiment(r):
+    if r <= 2:
+        return "Negative"
+    elif r == 3:
+        return "Neutral"
+    else:
+        return "Positive"
+
+data["sentiment"] = data["rating"].apply(rating_to_sentiment)
+
+def clean_text(text):
+    text = str(text).lower()
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"[^a-zA-Z\s]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+data["clean_text"] = data["review_text"].apply(clean_text)
+
+print("Sentiment Distribution:\n")
+print(data["sentiment"].value_counts())
+
+sns.countplot(x="sentiment", data=data)
+plt.title("Sentiment Distribution")
+plt.show()
+
+all_text = " ".join(data["clean_text"])
+wc = WordCloud(width=900, height=400, background_color="white").generate(all_text)
+
+plt.figure(figsize=(12,5))
+plt.imshow(wc)
+plt.axis("off")
+plt.title("Most Frequent Words")
+plt.show()
+
+tfidf = TfidfVectorizer(stop_words="english", max_features=4000)
+X = tfidf.fit_transform(data["clean_text"])
+
+encoder = LabelEncoder()
+y = encoder.fit_transform(data["sentiment"])
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+model = LogisticRegression(max_iter=1000)
+model.fit(X_train, y_train)
+
+pred = model.predict(X_test)
+
+print("\nAccuracy:", accuracy_score(y_test, pred))
+print("\nClassification Report:\n")
+print(classification_report(y_test, pred))
+
+cm = confusion_matrix(y_test, pred)
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
+plt.title("Confusion Matrix")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.show()
+
+count_vectorizer = CountVectorizer(stop_words="english", max_df=0.95, min_df=2)
+dtm = count_vectorizer.fit_transform(data["clean_text"])
+
+lda = LatentDirichletAllocation(n_components=3, random_state=42)
+lda.fit(dtm)
+
+print("\nTop Words in Each Topic:\n")
+feature_names = count_vectorizer.get_feature_names_out()
+
+for index, topic in enumerate(lda.components_):
+    print(f"Topic {index + 1}:")
+    print([feature_names[i] for i in topic.argsort()[-8:]])
+    print()
+
+data["date"] = pd.to_datetime(data["date"])
+data["month"] = data["date"].dt.to_period("M")
+
+trend = data.groupby(["month", "sentiment"]).size().unstack()
+trend.plot(figsize=(10,5))
+plt.title("Sentiment Trend Over Time")
+plt.xlabel("Month")
+plt.ylabel("Number of Reviews")
+plt.show()
